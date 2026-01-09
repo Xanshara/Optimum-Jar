@@ -59,6 +59,8 @@ class BotListener extends ListenerAdapter with StrictLogging {
           handleExiva(event)
         case "help" =>
           handleHelp(event)
+		case "imbue" =>
+			com.tibiabot.imbue.ImbueCommand.handle(event)
         case "repair" =>
           handleRepair(event)
         case "galthen" =>

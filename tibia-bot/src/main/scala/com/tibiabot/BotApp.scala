@@ -22,6 +22,7 @@ import net.dv8tion.jda.api.entities.User
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.entities.Message
 import com.tibiabot.splitloot.SplitLootListener
+import com.tibiabot.imbue.ImbueCommand
 
 import java.awt.Color
 import java.sql.{Connection, DriverManager, Timestamp}
@@ -94,6 +95,8 @@ object BotApp extends App with StrictLogging {
   val jda = JDABuilder.createDefault(Config.token)
 	.addEventListeners(new BotListener())
 	.addEventListeners(new SplitLootListener())
+	.addEventListeners(new com.tibiabot.rashid.RashidListener())
+	.addEventListeners(new com.tibiabot.info.InfoListener())
 	.build()
 
   jda.awaitReady()
@@ -396,9 +399,15 @@ object BotApp extends App with StrictLogging {
     )
 
 // split loot command
-	private val splitLootCommand: SlashCommandData = Commands.slash("split_loot", "Dzieli loot z party huntu w Tibii")
+private val splitLootCommand: SlashCommandData = Commands.slash("split_loot", "Dzieli loot z party huntu w Tibii")
 
-  lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand, boostedCommand, galthenCommand, splitLootCommand)
+// rashid command
+private val rashidCommand: SlashCommandData = Commands.slash("rashid", "Wyświetla lokalizację Rashida na dziś")
+
+// info command
+private val infoCommand: SlashCommandData = Commands.slash("info", "Informacje o bocie")
+
+lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand, boostedCommand, galthenCommand, splitLootCommand, rashidCommand, infoCommand,  ImbueCommand.command)
 
   // create the deaths/levels cache db
   createCacheDatabase()
@@ -413,6 +422,19 @@ object BotApp extends App with StrictLogging {
       g.updateCommands().addCommands(commands.asJava).complete()
     }
   }
+
+// Start scheduler for Rashid & News (NOWE!)
+logger.info("Initializing scheduled tasks...")
+  logger.info(s"Rashid channels from config: ${Config.rashidChannels}")
+  logger.info(s"News channels from config: ${Config.newsChannels}")
+// Możesz skonfigurować ID kanałów lub pozostawić puste na razie
+val schedulerManager = new com.tibiabot.scheduler.ScheduledTasksManager(
+  jda = jda,
+  rashidChannelIds = Config.rashidChannels,  // Ustaw ID kanału dla daily Rashid lub "0" aby wyłączyć
+  newsChannelIds = Config.newsChannels     // Ustaw ID kanału dla newsów lub "0" aby wyłączyć
+)(actorSystem, ex)
+schedulerManager.start()
+logger.info("Scheduled tasks started")
 
   // Start all world streams
   var startUpComplete = false

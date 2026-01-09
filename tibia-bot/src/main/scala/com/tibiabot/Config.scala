@@ -19,17 +19,50 @@ object Config {
   val postgresHost: String = discord.getString("postgres-host")
   val postgresPassword: String = discord.getString("postgres-password")
   val tibiadataApi: String = discord.getString("localapi-host")
+  
+  // ===== Kanały dla Rashid i News (z prod.env) =====
+  /**
+   * Parsuje string z ID kanałów oddzielonych przecinkami
+   * Przykład: "123,456,789" -> List("123", "456", "789")
+   * Jeśli "0" lub pusty -> pusta lista (wyłączone)
+   */
+  private def parseChannelIds(channelString: String): List[String] = {
+    if (channelString == null || channelString.trim.isEmpty || channelString.trim == "0") {
+      List.empty
+    } else {
+      channelString.split(",").map(_.trim).filter(_.nonEmpty).toList
+    }
+  }
+
+  val rashidChannels: List[String] = parseChannelIds(
+    sys.env.getOrElse("RASHID_CHANNELS", "0")
+  )
+
+  val newsChannels: List[String] = parseChannelIds(
+    sys.env.getOrElse("NEWS_CHANNELS", "0")
+  )
+  
   val creatureUrlMappings: Map[String, String] = mappings.getObject("creature-url-mappings").asScala.map {
     case (k, v) => k -> v.unwrapped().toString
   }.toMap
 
   // this is the message sent when the bot joins a discord or a user uses /help
-  val helpText = s"**How to use the bot:**\n" +
-    "Simply use `/setup <World Name>` to setup the bot.\n\n" +
-    "**Commands & Features:**\n" +
-    "All interactions with the bot are done through **[slash commands](https://support.discord.com/hc/en-us/articles/1500000368501-Slash-Commands-FAQ)**.\n" +
-    "If you type `/` and click on **Optimum Bot** - you will see all the commands available to you.\n\n" +
-    "[Website]() | [Discord]() | [Donate]()"
+val websiteUrl = sys.env.getOrElse("OPTIMUM_WEBSITE", "")
+val discordUrl = sys.env.getOrElse("OPTIMUM_DISCORD", "")
+val donateUrl  = sys.env.getOrElse("OPTIMUM_DONATE", "")
+
+val helpText =
+  "👋 **Welcome to Optimum Bot!**\n" +
+  "Thanks for adding me to your server — let’s get you set up quickly 🚀\n\n" +
+  "**🔧 Getting Started**\n" +
+  "Use `/setup <world name>` to configure the bot for your Tibia world.\n\n" +
+  "**⚙️ Commands & Usage**\n" +
+  "Optimum Bot works entirely with **slash commands**.\n" +
+  "Just type `/` and select **Optimum Bot** to see everything I can do.\n\n" +
+  "No spam, no clutter — just clean and useful Tibia info 📊\n\n" +
+  s"[Website]($websiteUrl)\n[Discord]($discordUrl)\n[Donate]($donateUrl)"
+
+    // "All interactions with the bot are done through **[slash commands](https://support.discord.com/hc/en-us/articles/1500000368501-Slash-Commands-FAQ)**.\n" +
 
   // discord config
   val webHookAvatar: String = discord.getString("avatar-url")

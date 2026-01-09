@@ -5,29 +5,29 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 import net.dv8tion.jda.api.hooks.ListenerAdapter
 import com.typesafe.scalalogging.StrictLogging
 import java.awt.Color
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
 /**
  * Listener dla komendy /info
  */
 class InfoListener extends ListenerAdapter with StrictLogging {
-  
-  // Data uruchomienia bota (statyczna)
-  private val startTime = LocalDateTime.now()
-  
+
+  // ENV VARIABLES (do użycia globalnie w projekcie)
+  private val websiteUrl = sys.env.get("OPTIMUM_WEBSITE")
+  private val discordUrl = sys.env.get("OPTIMUM_DISCORD")
+  private val donateUrl  = sys.env.get("OPTIMUM_DONATE")
+
   override def onSlashCommandInteraction(event: SlashCommandInteractionEvent): Unit = {
     if (event.getName == "info") {
       handleInfo(event)
     }
   }
-  
+
   /**
    * Obsługa komendy /info
    */
   private def handleInfo(event: SlashCommandInteractionEvent): Unit = {
     event.deferReply().queue()
-    
+
     try {
       val embed = createInfoEmbed()
       event.getHook.sendMessageEmbeds(embed).queue()
@@ -35,64 +35,88 @@ class InfoListener extends ListenerAdapter with StrictLogging {
       case e: Exception =>
         logger.error("Error in /info command", e)
         val errorEmbed = new EmbedBuilder()
-          .setDescription("❌ An error occurred while fetching bot information.")
+          .setDescription("❌ Wystąpił błąd podczas pobierania informacji o bocie.")
           .setColor(Color.RED)
           .build()
         event.getHook.sendMessageEmbeds(errorEmbed).queue()
     }
   }
-  
+
   /**
    * Tworzy embed z informacjami o bocie
    */
   private def createInfoEmbed(): net.dv8tion.jda.api.entities.MessageEmbed = {
-    val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-    val formattedStartTime = startTime.format(formatter)
-    
-    val embed = new EmbedBuilder()
-      .setTitle("Informacje o bocie")
-      .setColor(new Color(255, 102, 0)) // Pomarańczowy (#FF6600)
+
+    val footerText = buildFooterText()
+
+    val embedBuilder = new EmbedBuilder()
+      .setTitle("ℹ️ Informacje o Optimum Bot")
+      .setColor(new Color(255, 102, 0)) // #FF6600
+
       .addField(
-        "Właściciel bota",
-        "👑 Właściciel: Sinrac\n\nPrawa do bota i jego kodu są zastrzeżone.",
+        "👑 Właściciel",
+        "Optimum Bot został stworzony i jest rozwijany przez **Sinrac**.\n" +
+        "Autor posiada pełne prawa do bota oraz jego kodu źródłowego.",
         false
       )
+
       .addField(
-        "Zastrzeżenia prawne",
-        "📝 Wszystkie prawa zastrzeżone. Żadna część tego bota nie może być używana lub " +
-        "reprodukowana bez zgody właściciela.",
+        "⚖️ Informacje prawne",
+        "Wszystkie prawa zastrzeżone.\n" +
+        "Kopiowanie, modyfikowanie lub rozpowszechnianie bota lub jego części\n" +
+        "bez zgody autora jest zabronione.",
         false
       )
+
       .addField(
-        "Wersja bota",
-        "🛠️ Wersja: v1.9.0",
+        "🛠️ Wersja",
+        "Aktualna wersja bota: **v1.9.0**",
         false
       )
+
       .addField(
-        "Data uruchomienia",
-        s"📅 Data uruchomienia: $formattedStartTime",
+        "📅 Uruchomienie",
+        "Bot działa nieprzerwanie od:\n**7 stycznia 2025**",
         false
       )
+
       .addField(
-        "Informacje dodatkowe",
-        "🤖 Optimum Bot to zaawansowany bot do śledzenia aktywności w grze Tibia MMORPG.",
+        "🤖 O bocie",
+        "Optimum Bot to zaawansowany bot Discord do monitorowania i zarządzania\n" +
+        "aktywnością w grze **Tibia MMORPG**.\n\n" +
+        "Zaprojektowany z myślą o czytelności, automatyzacji i minimum spamu.",
         false
       )
+
       .addField(
-        "Dostępne komendy",
-        "📝 **/setup** - Konfiguracja bota dla świata Tibia\n\n" +
-        "📝 **/hunted** - Zarządzanie listą wrogów\n\n" +
-        "📝 **/allies** - Zarządzanie listą sojuszników\n\n" +
-        "📝 **/neutral** - Zarządzanie listą neutralnych\n\n" +
-        "📝 **/online** - Konfiguracja kanałów online\n\n" +
-        "📝 **/split_loot** - Dzieli łup z party huntu\n\n" +
-        "📝 **/rashid** - Wyświetla lokalizację Rashida\n\n" +
-        "📝 **/info** - Informacje o bocie\n\n" +
-        "📜 Więcej komend dostępnych po wpisaniu `/` na serwerze.",
+        "📜 Dostępne komendy",
+        "🔧 **/setup** – konfiguracja bota dla wybranego świata\n" +
+        "⚔️ **/hunted** – zarządzanie listą wrogów\n" +
+        "🤝 **/allies** – zarządzanie sojusznikami\n" +
+        "⚖️ **/neutral** – lista graczy neutralnych\n" +
+        "🟢 **/online** – konfiguracja kanałów online\n" +
+        "💰 **/split_loot** – podział łupu z party\n" +
+        "🧙 **/rashid** – aktualna lokalizacja Rashida\n" +
+        "ℹ️ **/info** – informacje o bocie\n\n" +
+        "📌 Wpisz `/`, aby zobaczyć wszystkie dostępne komendy.",
         false
       )
-      .build()
-    
-    embed
+
+    footerText.foreach(embedBuilder.setFooter)
+
+    embedBuilder.build()
+  }
+
+  /**
+   * Składa footer na podstawie ENV
+   */
+  private def buildFooterText(): Option[String] = {
+    val parts = Seq(
+      websiteUrl.map(url => s"🌐 Website: $url"),
+      discordUrl.map(url => s"💬 Discord: $url"),
+      donateUrl.map(url  => s"❤️ Donate: $url")
+    ).flatten
+
+    if (parts.nonEmpty) Some(parts.mkString(" | ")) else None
   }
 }
