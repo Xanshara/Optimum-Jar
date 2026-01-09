@@ -27,7 +27,9 @@ jobs:
         uses: sbt/setup-sbt@v1
 
       - name: Run tests
+        working-directory: optimum-jar/tibia-bot
         run: sbt test
 
       - name: Upload dependency graph
+        working-directory: optimum-jar/tibia-bot
         uses: scalacenter/sbt-dependency-submission@ab086b50c947c9774b70f39fc7f6e20ca2706c91
