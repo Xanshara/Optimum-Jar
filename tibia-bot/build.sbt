@@ -41,7 +41,24 @@ assembly / mainClass := Some("com.tibiabot.BotApp")
 assembly / assemblyMergeStrategy := {
   case PathList("reference.conf")    => MergeStrategy.concat
   case PathList("application.conf")  => MergeStrategy.concat
-  case PathList("META-INF", _ @ _*)  => MergeStrategy.discard
+  
+  // KRYTYCZNA ZMIANA: Zachowaj pliki services (potrzebne dla JDBC)
+  case PathList("META-INF", "services", xs @ _*) => MergeStrategy.concat
+  
+  // NOWE: Obs³uga module-info.class (Java 9+ modules)
+  case PathList("META-INF", "versions", xs @ _*) if xs.lastOption.contains("module-info.class") => MergeStrategy.discard
+  case "module-info.class" => MergeStrategy.discard
+  
+  // Odrzuæ pozosta³e pliki META-INF
+  case PathList("META-INF", "MANIFEST.MF") => MergeStrategy.discard
+  case PathList("META-INF", "LICENSE") => MergeStrategy.discard
+  case PathList("META-INF", "LICENSE.txt") => MergeStrategy.discard
+  case PathList("META-INF", "NOTICE") => MergeStrategy.discard
+  case PathList("META-INF", "NOTICE.txt") => MergeStrategy.discard
+  case PathList("META-INF", xs @ _*) if xs.lastOption.exists(_.endsWith(".SF")) => MergeStrategy.discard
+  case PathList("META-INF", xs @ _*) if xs.lastOption.exists(_.endsWith(".DSA")) => MergeStrategy.discard
+  case PathList("META-INF", xs @ _*) if xs.lastOption.exists(_.endsWith(".RSA")) => MergeStrategy.discard
+  
   case x =>
     val old = (assembly / assemblyMergeStrategy).value
     old(x)
