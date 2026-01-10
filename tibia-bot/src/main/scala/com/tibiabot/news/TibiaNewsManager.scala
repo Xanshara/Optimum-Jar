@@ -10,35 +10,41 @@ import net.dv8tion.jda.api.JDA
 import spray.json._
 import java.awt.Color
 import java.io.{File, PrintWriter}
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, Await}
+import scala.concurrent.duration._
 import scala.io.Source
 import scala.util.{Failure, Success, Try}
 
-/**
- * Model danych dla newsa z Tibia
- */
 case class TibiaNewsItem(
   id: Int,
-  title: String,
-  url: String,
   date: String,
+  news: String,
+  category: String,
   `type`: String,
-  category: String
+  url: String,
+  url_api: String
+)
+
+case class TibiaNewsDetailItem(
+  id: Int,
+  date: String,
+  title: String,
+  category: String,
+  url: String,
+  content: String,
+  content_html: String
 )
 
 case class TibiaNewsResponse(news: List[TibiaNewsItem])
+case class TibiaNewsDetailResponse(news: TibiaNewsDetailItem)
 
-/**
- * JSON protocol dla spray-json
- */
 object TibiaNewsJsonProtocol extends DefaultJsonProtocol {
-  implicit val newsItemFormat: RootJsonFormat[TibiaNewsItem] = jsonFormat6(TibiaNewsItem)
+  implicit val newsItemFormat: RootJsonFormat[TibiaNewsItem] = jsonFormat7(TibiaNewsItem)
   implicit val newsResponseFormat: RootJsonFormat[TibiaNewsResponse] = jsonFormat1(TibiaNewsResponse)
+  implicit val newsDetailItemFormat: RootJsonFormat[TibiaNewsDetailItem] = jsonFormat7(TibiaNewsDetailItem)
+  implicit val newsDetailResponseFormat: RootJsonFormat[TibiaNewsDetailResponse] = jsonFormat1(TibiaNewsDetailResponse)
 }
 
-/**
- * Manager do pobierania i wysyłania newsów z Tibia
- */
 class TibiaNewsManager(implicit system: ActorSystem, ec: ExecutionContext) extends StrictLogging {
   
   import TibiaNewsJsonProtocol._
@@ -46,9 +52,6 @@ class TibiaNewsManager(implicit system: ActorSystem, ec: ExecutionContext) exten
   private val LAST_NEWS_FILE = "last_news_id.txt"
   private val API_URL = "https://api.tibiadata.com/v4/news/latest"
   
-  /**
-   * Pobiera ID ostatniego sprawdzonego newsa
-   */
   private def getLastNewsId(): Option[Int] = {
     Try {
       val file = new File(LAST_NEWS_FILE)
@@ -63,9 +66,6 @@ class TibiaNewsManager(implicit system: ActorSystem, ec: ExecutionContext) exten
     }.toOption.flatten
   }
   
-  /**
-   * Zapisuje ID ostatniego sprawdzonego newsa
-   */
   private def saveLastNewsId(newsId: Int): Unit = {
     Try {
       val writer = new PrintWriter(new File(LAST_NEWS_FILE))
@@ -77,9 +77,6 @@ class TibiaNewsManager(implicit system: ActorSystem, ec: ExecutionContext) exten
     }
   }
   
-  /**
-   * Pobiera newsy z API Tibia
-   */
   def fetchNews(): Future[List[TibiaNewsItem]] = {
     Http().singleRequest(HttpRequest(uri = API_URL)).flatMap {
       case HttpResponse(status, _, entity, _) if status.isSuccess() =>
@@ -99,62 +96,85 @@ class TibiaNewsManager(implicit system: ActorSystem, ec: ExecutionContext) exten
     }
   }
   
-  /**
-   * Sprawdza nowe newsy i wysyła je na kanał
-   */
-def checkAndSendNews(jda: JDA, channelId: String): Future[Unit] = {
-  if (channelId.isEmpty || channelId == "0") {
-    logger.debug("News channel not configured, skipping news check")
-    Future.successful(())
-  } else {
-    fetchNews().map { newsList =>
-      if (newsList.isEmpty) {
-        logger.debug("No news fetched from API")
-      } else {
-        val lastId = getLastNewsId()
-        val newItems = lastId match {
-          case Some(id) =>
-            newsList.takeWhile(_.id != id)
-          case None =>
-            newsList.take(1)
+  def fetchNewsDetails(newsId: Int): Future[Option[TibiaNewsDetailItem]] = {
+    val detailUrl = s"https://api.tibiadata.com/v4/news/id/$newsId"
+    Http().singleRequest(HttpRequest(uri = detailUrl)).flatMap {
+      case HttpResponse(status, _, entity, _) if status.isSuccess() =>
+        Unmarshal(entity).to[String].map { jsonString =>
+          val json = jsonString.parseJson
+          val detailResponse = json.convertTo[TibiaNewsDetailResponse]
+          Some(detailResponse.news)
         }
-
-        if (newItems.nonEmpty) {
-          Try {
-            val channel = jda.getTextChannelById(channelId)
-            if (channel != null && channel.canTalk()) {
-              newItems.reverse.foreach { newsItem =>
-                val embed = createNewsEmbed(newsItem)
-                channel.sendMessageEmbeds(embed).queue()
-                Thread.sleep(1000)
-              }
-              saveLastNewsId(newsList.head.id)
-              logger.info(s"Sent ${newItems.size} new Tibia news to channel $channelId")
-            } else {
-              logger.warn(s"Cannot send news to channel $channelId - channel not found or no permissions")
-            }
-          } match {
-            case Failure(e) => logger.error("Error sending news to Discord", e)
-            case Success(_) => ()
-          }
+      case HttpResponse(_, _, entity, _) =>
+        entity.discardBytes()
+        Future.successful(None)
+    }.recover {
+      case _ => None
+    }
+  }
+  
+  def checkAndSendNews(jda: JDA, channelId: String): Future[Unit] = {
+    if (channelId.isEmpty || channelId == "0") {
+      logger.debug("News channel not configured, skipping news check")
+      Future.successful(())
+    } else {
+      fetchNews().map { newsList =>
+        if (newsList.isEmpty) {
+          logger.debug("No news fetched from API")
         } else {
-          logger.debug("No new news to send")
+          val lastId = getLastNewsId()
+          val newItems = lastId match {
+            case Some(id) => newsList.takeWhile(_.id != id)
+            case None => newsList.take(1)
+          }
+
+          if (newItems.nonEmpty) {
+            Try {
+              val channel = jda.getTextChannelById(channelId)
+              if (channel != null && channel.canTalk()) {
+                newItems.reverse.foreach { newsItem =>
+                  val detailsFuture = fetchNewsDetails(newsItem.id)
+                  val details = Await.result(detailsFuture, 5.seconds)
+                  
+                  details match {
+                    case Some(detail) =>
+                      val embed = createNewsEmbed(detail)
+                      channel.sendMessageEmbeds(embed).queue()
+                      Thread.sleep(1000)
+                    case None =>
+                      logger.warn(s"Could not fetch details for news ${newsItem.id}")
+                  }
+                }
+                saveLastNewsId(newsList.head.id)
+                logger.info(s"Sent ${newItems.size} new Tibia news to channel $channelId")
+              } else {
+                logger.warn(s"Cannot send news to channel $channelId - channel not found or no permissions")
+              }
+            } match {
+              case Failure(e) => logger.error("Error sending news to Discord", e)
+              case Success(_) => ()
+            }
+          } else {
+            logger.debug("No new news to send")
+          }
         }
       }
     }
   }
-}
   
-  /**
-   * Tworzy embed dla newsa
-   */
-  private def createNewsEmbed(newsItem: TibiaNewsItem): net.dv8tion.jda.api.entities.MessageEmbed = {
+  private def createNewsEmbed(newsItem: TibiaNewsDetailItem): net.dv8tion.jda.api.entities.MessageEmbed = {
+    val truncatedContent = if (newsItem.content.length > 501) {
+      newsItem.content.take(498) + "..."
+    } else {
+      newsItem.content
+    }
+    
     new EmbedBuilder()
       .setTitle(newsItem.title, newsItem.url)
-      .setDescription(s"Type: ${newsItem.`type`}\nDate: ${newsItem.date}")
-      .addField("Category", newsItem.category, false)
+      .setDescription(truncatedContent)
       .setColor(Color.BLUE)
-      .setFooter("Tibia News", "https://static.tibia.com/images/global/general/tibialogo.gif")
+      .setThumbnail("https://static.tibia.com/images/global/general/tibialogo.gif")
+      .setFooter(s"Ticket: ${newsItem.id} - ${newsItem.date}", null)
       .build()
   }
 }

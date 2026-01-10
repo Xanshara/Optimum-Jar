@@ -437,8 +437,14 @@ schedulerManager.start()
 logger.info("Scheduled tasks started")
 
   // Start all world streams
-  var startUpComplete = false
-  startBot(None, None) // guild: Option[Guild], world: Option[String]
+  // ===== STARTUP =====
+var startUpComplete = false
+
+// Log persistent guilds configuration
+logger.info(s"=== PERSISTENT GUILDS CONFIGURED: ${Config.persistentGuilds} ===")
+
+startUpComplete = true
+
 
   // run the scheduler to clean cache and update dashboard every hour
   actorSystem.scheduler.schedule(60.seconds, 30.seconds) {
@@ -5193,61 +5199,83 @@ logger.info("Scheduled tasks started")
     conn.close()
   }
 
-  def discordLeave(event: GuildLeaveEvent): Unit = {
-    val guildId = event.getGuild.getId
+   def discordLeave(event: GuildLeaveEvent): Unit = {
+  val guildId = event.getGuild.getId
 
-    // Remove from worldsData if exists
-    if (worldsData.contains(guildId)) {
-      val updatedWorldsData = worldsData - guildId
-      worldsData = updatedWorldsData
-    }
-
-    // Remove from discordsData if exists
-    val updatedDiscordsData = discordsData.map { case (world, discordsList) =>
-      if (discordsList.exists(_.id == guildId)) {
-        val updatedDiscords = discordsList.filterNot(_.id == guildId)
-        world -> updatedDiscords
-      } else {
-        world -> discordsList
-      }
-    }
-    // Only update discordsData if the guild existed in it
-    if (updatedDiscordsData != discordsData) {
-      discordsData = updatedDiscordsData
-    }
-
-    // Remove from botStreams if exists
-    val updatedBotStreams = botStreams.map { case (world, streams) =>
-      val updatedUsedBy = streams.usedBy.filterNot(_.id == guildId)
-      if (updatedUsedBy.isEmpty) {
-        streams.stream.cancel()
-        None // Return None to indicate that this entry should be removed from the map
-      } else if (streams.usedBy != updatedUsedBy) {
-        // Only update the streams if the usedBy list has changed
-        Some(world -> streams.copy(usedBy = updatedUsedBy)) // Return the updated entry wrapped in Some
-      } else {
-        Some(world -> streams) // Return the existing entry wrapped in Some
-      }
-    }.flatten.toMap // Convert the resulting Iterable[(String, Streams)] back into a Map
-
-    // Only update botStreams if any changes were made
-    if (updatedBotStreams != botStreams) {
-      botStreams = updatedBotStreams
-    }
-
-    logger.info(guildId)
-
-    if (guildId == "912739993015947324" || guildId == "1176279097001918516" || guildId == "1224670957466161234") {
-      // Config is shared with Pulsera Bot
-      logger.info("Config is shared between Pulsera Bot, will use as alpha environment will delete when guild wants it deleted")
-    } else {
-      removeConfigDatabase(guildId)
-    }
-
+  // ===== PERSISTENT GUILDS (PROD SAFETY) =====
+  if (Config.persistentGuilds.contains(guildId)) {
+    logger.info(s"[PERSISTENT] Guild $guildId left – keeping RAM + DB config")
+    return
   }
+
+  logger.info(s"Guild $guildId left – cleaning RAM + DB")
+
+  // ===== RAM CLEANUP =====
+
+  // Remove from worldsData
+  if (worldsData.contains(guildId)) {
+    worldsData = worldsData - guildId
+  }
+
+  // Remove from discordsData
+  discordsData = discordsData.map { case (world, discordsList) =>
+    world -> discordsList.filterNot(_.id == guildId)
+  }
+
+  // Remove from botStreams
+  botStreams = botStreams.flatMap { case (world, streams) =>
+    val updatedUsedBy = streams.usedBy.filterNot(_.id == guildId)
+
+    if (updatedUsedBy.isEmpty) {
+      streams.stream.cancel()
+      None
+    } else {
+      Some(world -> streams.copy(usedBy = updatedUsedBy))
+    }
+  }
+
+  // ===== DB CLEANUP =====
+  try {
+    removeConfigDatabase(guildId)
+  } catch {
+    case e: Exception =>
+      logger.error(s"Failed to remove DB config for guild $guildId", e)
+  }
+}
+
 
   def discordJoin(event: GuildJoinEvent): Unit = {
     val guild = event.getGuild
+    val guildId = guild.getId
+    
+    // ===== PERSISTENT GUILDS: Restore from DB =====
+    if (Config.persistentGuilds.contains(guildId)) {
+      logger.info(s"[PERSISTENT] Guild $guildId rejoined – restoring config from DB")
+      
+      try {
+        // Load all worlds for this guild from DB
+        val worldsInfo = worldConfig(guild)
+        
+        if (worldsInfo.nonEmpty) {
+          // Restore each world's configuration
+          worldsInfo.foreach { world =>
+            logger.info(s"[PERSISTENT] Restoring world '${world.name}' for guild $guildId")
+            startBot(Some(guild), Some(world.name))
+          }
+          
+          logger.info(s"[PERSISTENT] Successfully restored ${worldsInfo.size} world(s) for guild $guildId")
+        } else {
+          logger.warn(s"[PERSISTENT] No worlds found in DB for guild $guildId")
+        }
+      } catch {
+        case ex: Exception =>
+          logger.error(s"[PERSISTENT] Failed to restore config for guild $guildId", ex)
+      }
+      
+      return
+    }
+    
+    // ===== NORMAL GUILDS: Send welcome message =====
     val publicChannel = guild.getTextChannelById(guild.getDefaultChannel.getId)
     if (publicChannel != null) {
       if (publicChannel.canTalk() || !(Config.prod)) {

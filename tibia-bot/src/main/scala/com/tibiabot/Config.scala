@@ -352,4 +352,11 @@ val helpText =
     "missing file", "vampire bat", "missing file", "vampiric essence", "missing file", "blood pool", "norcferatu abomination", "norcferatu heartless", "norcferatu minion", "norcferatu monstrosity",
     "norcferatu nightweaver", "orclops bloodbreaker", "shell drake", "vampiric flesh", "vampiric heart", "varg", "vicious ink splash"
   )
+  val persistentGuilds: Set[String] =
+  sys.env
+    .getOrElse("PERSISTENT_GUILDS", "")
+    .split(",")
+    .map(_.trim)
+    .filter(_.nonEmpty)
+    .toSet
 }

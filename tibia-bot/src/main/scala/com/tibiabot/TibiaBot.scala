@@ -73,7 +73,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   }
 
   private val logAndResume: Attributes = supervisionStrategy(logAndResumeDecider)
-  private lazy val sourceTick = Source.tick(2.seconds, 60.seconds, ())
+  private lazy val sourceTick = Source.tick(2.seconds, 120.seconds, ())
   private lazy val getWorld = Flow[Unit].mapAsync(1) { _ =>
     logger.info(s"Running stream for world: '$world'")
     tibiaDataClient.getWorld(world) // Pull all online characters
@@ -1521,7 +1521,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       }
 
       var currentMessage = 0
-      values.foreach { v =>
+		var editDelay = 0  
+    values.foreach { v =>
         val currentField = field + "\n" + v
         if (currentField.length >= 4060 || (currentField.length >= 3850 && v.startsWith(s"### ["))) { // don't add field yet, there is still room
           val interimEmbed = new EmbedBuilder()
@@ -1529,7 +1530,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           interimEmbed.setColor(embedColor)
           if (currentMessage < messages.size) {
             // edit the existing message
-            messages.get(currentMessage).editMessageEmbeds(interimEmbed.build()).queue()
+             mat.system.scheduler.scheduleOnce(editDelay.milliseconds) {
+				messages.get(currentMessage).editMessageEmbeds(interimEmbed.build()).queue()
+			}
+			editDelay += 400
           }
           else {
             // there isn't an existing message to edit, so post a new one
@@ -1546,8 +1550,11 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             interimEmbed.setColor(embedColor)
             if (currentMessage < messages.size) {
               // edit the existing message
-              messages.get(currentMessage).editMessageEmbeds(interimEmbed.build()).queue()
-            }
+             mat.system.scheduler.scheduleOnce(editDelay.milliseconds) {
+				messages.get(currentMessage).editMessageEmbeds(interimEmbed.build()).queue()
+			}
+			editDelay += 400
+          }
             else {
               // there isn't an existing message to edit, so post a new one
               channel.sendMessageEmbeds(interimEmbed.build()).setSuppressedNotifications(true).queue()
@@ -1566,9 +1573,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val timestamp = OffsetDateTime.now()
       finalEmbed.setTimestamp(timestamp)
       if (currentMessage < messages.size) {
-        // edit the existing message
-        messages.get(currentMessage).editMessageEmbeds(finalEmbed.build()).queue()
-      }
+		mat.system.scheduler.scheduleOnce(editDelay.milliseconds) {
+			messages.get(currentMessage).editMessageEmbeds(finalEmbed.build()).queue()
+		}
+	  }
       else {
         // there isn't an existing message to edit, so post a new one
         channel.sendMessageEmbeds(finalEmbed.build()).setSuppressedNotifications(true).queue()
